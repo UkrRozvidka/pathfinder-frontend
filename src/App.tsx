@@ -1,69 +1,49 @@
 import React from 'react';
-import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
-import { ThemeProvider, CssBaseline } from '@mui/material';
+import { BrowserRouter } from 'react-router-dom';
+import { CssBaseline, ThemeProvider, createTheme } from '@mui/material';
+import { AuthProvider } from './contexts/AuthContext';
 import Layout from './components/Layout';
-import LoginPage from './pages/LoginPage';
-import { AuthProvider, useAuth } from './contexts/AuthContext';
-import { theme } from './theme';
-import RegisterPage from './pages/RegisterPage';
-import HikesPage from './pages/HikesPage';
-import CreateHikePage from './pages/CreateHikePage';
-import EditHikePage from './pages/EditHikePage';
-import HikeDetailsPage from './pages/HikeDetailsPage';
+import Router from './Router';
 
-const ProtectedRoute: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  const { isAuthenticated } = useAuth();
-  return isAuthenticated ? <>{children}</> : <Navigate to="/login" />;
-};
+const App: React.FC = () => {
+  const [mode, setMode] = React.useState<'light' | 'dark'>(
+    localStorage.getItem('themeMode') as 'light' | 'dark' || 'light'
+  );
 
-function App() {
+  const theme = React.useMemo(
+    () =>
+      createTheme({
+        palette: {
+          mode,
+          primary: {
+            main: '#1976d2',
+          },
+          secondary: {
+            main: '#dc004e',
+          },
+        },
+      }),
+    [mode]
+  );
+
+  const toggleColorMode = () => {
+    const newMode = mode === 'light' ? 'dark' : 'light';
+    setMode(newMode);
+    localStorage.setItem('themeMode', newMode);
+  };
+
   return (
     <ThemeProvider theme={theme}>
       <CssBaseline />
       <AuthProvider>
-        <Router>
-          <Layout>
-            <Routes>
-              <Route path="/login" element={<LoginPage />} />
-              <Route path="/register" element={<RegisterPage />} />
-              <Route
-                path="/"
-                element={
-                  <ProtectedRoute>
-                    <HikesPage />
-                  </ProtectedRoute>
-                }
-              />
-              <Route
-                path="/hikes/create"
-                element={
-                  <ProtectedRoute>
-                    <CreateHikePage />
-                  </ProtectedRoute>
-                }
-              />
-              <Route
-                path="/hikes/:id"
-                element={
-                  <ProtectedRoute>
-                    <HikeDetailsPage />
-                  </ProtectedRoute>
-                }
-              />
-              <Route
-                path="/hikes/:id/edit"
-                element={
-                  <ProtectedRoute>
-                    <EditHikePage />
-                  </ProtectedRoute>
-                }
-              />
-            </Routes>
+        <BrowserRouter>
+          <Layout toggleColorMode={toggleColorMode} mode={mode}>
+            <Router />
           </Layout>
-        </Router>
+        </BrowserRouter>
       </AuthProvider>
     </ThemeProvider>
   );
-}
+};
 
 export default App;

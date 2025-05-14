@@ -39,6 +39,7 @@ import { HikeGetFullDTO, PointCreateDTO, PointUpdateDTO, GeoPoint } from '../typ
 import CloudUploadIcon from '@mui/icons-material/CloudUpload';
 import CloudDownloadIcon from '@mui/icons-material/CloudDownload';
 import { styled } from '@mui/material/styles';
+import SaveIcon from '@mui/icons-material/Save';
 
 // Fix Leaflet default icon
 delete (L.Icon.Default.prototype as any)._getIconUrl;
@@ -180,12 +181,14 @@ const HikeDetailsPage: React.FC = () => {
   const [addMemberDialogOpen, setAddMemberDialogOpen] = useState(false);
   const [isAddingPoint, setIsAddingPoint] = useState(false);
   const [selectedPoint, setSelectedPoint] = useState<{ id: number; geoPoint: GeoPoint; priority: number } | null>(null);
-  const [pointPriority, setPointPriority] = useState(1);
+  const [pointPriority, setPointPriority] = useState(10);
   const [selectedTrack, setSelectedTrack] = useState<number | null>(null);
   const [newTrackDialogOpen, setNewTrackDialogOpen] = useState(false);
   const [newTrackName, setNewTrackName] = useState('');
   const [selectedTrackPoints, setSelectedTrackPoints] = useState<[number, number][]>([]);
   const [trackLoadError, setTrackLoadError] = useState<string>('');
+  const [isEditingPoint, setIsEditingPoint] = useState(false);
+  const [editingLocation, setEditingLocation] = useState<GeoPoint | null>(null);
 
   useEffect(() => {
     const fetchHike = async () => {
@@ -254,24 +257,51 @@ const HikeDetailsPage: React.FC = () => {
     }
   };
 
+  const getCurrentUserHikeMember = () => {
+    return hike?.hikeMembers?.find(member => member.userId === userId);
+  };
+
+  const calculateNextPriority = () => {
+    const currentMember = getCurrentUserHikeMember();
+    if (!currentMember) return 10;
+
+    // Get all priorities currently used by the user
+    const usedPriorities = new Set(currentMember.points?.map(point => point.priority) || []);
+    
+    // Find the highest available priority from 10 to 1
+    for (let priority = 10; priority >= 1; priority--) {
+      if (!usedPriorities.has(priority)) {
+        return priority;
+      }
+    }
+    
+    // If all priorities are taken, return 1
+    return 1;
+  };
+
+  const handleAddPointClick = () => {
+    if (!selectedPoint) {
+      setPointPriority(calculateNextPriority());
+    }
+    setIsAddingPoint(true);
+  };
+
   const handleLocationSelect = async (location: GeoPoint) => {
     if (!hike || !userId) return;
 
+    if (isEditingPoint && selectedPoint) {
+      // In edit mode, just update the temporary location
+      setEditingLocation(location);
+      return;
+    }
+
     try {
-      if (selectedPoint) {
-        // Update existing point
-        await pointApi.updatePoint(selectedPoint.id, {
-          geoPoint: location,
-          priority: pointPriority
-        });
-      } else {
-        // Create new point
-        await pointApi.createPoint({
-          geoPoint: location,
-          priority: pointPriority,
-          hikeId: hike.id
-        });
-      }
+      // Create new point
+      await pointApi.createPoint({
+        geoPoint: location,
+        priority: pointPriority,
+        hikeId: hike.id
+      });
       
       // Refresh hike data
       const response = await hikeApi.getHike(hike.id);
@@ -280,11 +310,50 @@ const HikeDetailsPage: React.FC = () => {
       // Reset state
       setIsAddingPoint(false);
       setSelectedPoint(null);
-      setPointPriority(1);
+      setPointPriority(10);
     } catch (error) {
       console.error('Failed to handle point:', error);
       setError('Failed to save point. Please try again.');
     }
+  };
+
+  const handleEditClick = (point: { id: number; geoPoint: GeoPoint; priority: number }) => {
+    setSelectedPoint(point);
+    setPointPriority(point.priority);
+    setEditingLocation(point.geoPoint);
+    setIsEditingPoint(true);
+  };
+
+  const handleSaveEdit = async () => {
+    if (!selectedPoint || !editingLocation) return;
+
+    try {
+      await pointApi.updatePoint(selectedPoint.id, {
+        geoPoint: editingLocation,
+        priority: pointPriority
+      });
+      // Refresh hike data
+      if (hike) {
+        const response = await hikeApi.getHike(hike.id);
+        setHike(response.data);
+      }
+      
+      // Reset edit state
+      setIsEditingPoint(false);
+      setSelectedPoint(null);
+      setEditingLocation(null);
+      setPointPriority(10);
+    } catch (error) {
+      console.error('Failed to update point:', error);
+      setError('Failed to update point. Please try again.');
+    }
+  };
+
+  const handleCancelEdit = () => {
+    setIsEditingPoint(false);
+    setSelectedPoint(null);
+    setEditingLocation(null);
+    setPointPriority(10);
   };
 
   const handleDeletePoint = async (pointId: number) => {
@@ -298,10 +367,6 @@ const HikeDetailsPage: React.FC = () => {
       console.error('Failed to delete point:', error);
       setError('Failed to delete point. Please try again.');
     }
-  };
-
-  const getCurrentUserHikeMember = () => {
-    return hike?.hikeMembers?.find(member => member.userId === userId);
   };
 
   const canManagePoints = () => {
@@ -476,28 +541,60 @@ const HikeDetailsPage: React.FC = () => {
         <Grid item xs={12} md={8}>
           <Card>
             <CardContent>
-              <Box sx={{ mb: 2, display: 'flex', gap: 1 }}>
+              <Box sx={{ mb: 2, display: 'flex', gap: 1, alignItems: 'center' }}>
                 {canManagePoints() && (
                   <>
-                    <Button
-                      variant={isAddingPoint ? "contained" : "outlined"}
-                      startIcon={<AddLocationIcon />}
-                      onClick={() => {
-                        setIsAddingPoint(!isAddingPoint);
-                        setSelectedPoint(null);
-                      }}
-                    >
-                      {isAddingPoint ? "Cancel Adding Point" : "Add Point"}
-                    </Button>
-                    {isAddingPoint && (
-                      <TextField
-                        type="number"
-                        label="Priority"
-                        size="small"
-                        value={pointPriority}
-                        onChange={(e) => setPointPriority(Number(e.target.value))}
-                        sx={{ width: 100 }}
-                      />
+                    {!isEditingPoint && (
+                      <Button
+                        variant={isAddingPoint ? "contained" : "outlined"}
+                        startIcon={<AddLocationIcon />}
+                        onClick={handleAddPointClick}
+                      >
+                        {isAddingPoint ? "Cancel Adding Point" : "Add Point"}
+                      </Button>
+                    )}
+                    {isAddingPoint && !isEditingPoint && (
+                      <>
+                        <TextField
+                          type="number"
+                          label="Priority"
+                          size="small"
+                          value={pointPriority}
+                          onChange={(e) => setPointPriority(Number(e.target.value))}
+                          sx={{ width: 100 }}
+                          inputProps={{ min: 1, max: 10 }}
+                        />
+                        <Typography variant="caption" color="text.secondary">
+                          Suggested priority: {calculateNextPriority()}
+                        </Typography>
+                      </>
+                    )}
+                    {isEditingPoint && (
+                      <>
+                        <TextField
+                          type="number"
+                          label="Priority"
+                          size="small"
+                          value={pointPriority}
+                          onChange={(e) => setPointPriority(Number(e.target.value))}
+                          sx={{ width: 100 }}
+                          inputProps={{ min: 1, max: 10 }}
+                        />
+                        <Button
+                          variant="contained"
+                          color="primary"
+                          onClick={handleSaveEdit}
+                          startIcon={<SaveIcon />}
+                        >
+                          Save Changes
+                        </Button>
+                        <Button
+                          variant="outlined"
+                          onClick={handleCancelEdit}
+                        >
+                          Cancel
+                        </Button>
+                      </>
                     )}
                   </>
                 )}
@@ -515,7 +612,7 @@ const HikeDetailsPage: React.FC = () => {
                   />
                   <MapClickHandler 
                     onLocationSelect={handleLocationSelect} 
-                    isActive={isAddingPoint || selectedPoint !== null} 
+                    isActive={isAddingPoint || isEditingPoint} 
                   />
                   
                   <Marker 
@@ -540,51 +637,48 @@ const HikeDetailsPage: React.FC = () => {
                   </Marker>
                   
                   {hike.hikeMembers?.map((member) =>
-                    member.points?.map((point) => (
-                      <Marker
-                        key={point.id}
-                        position={[point.geoPoint.lat, point.geoPoint.lon]}
-                        icon={createCustomIcon(userColors[member.userId], point.priority.toString())}
-                      >
-                        <Popup>
-                          <Box>
-                            <Typography variant="subtitle2" sx={{ color: userColors[member.userId], fontWeight: 'bold' }}>
-                              {member.userName}
-                            </Typography>
-                            <Typography variant="body2">
-                              Priority: {point.priority}
-                            </Typography>
-                            {member.userId === userId && (
-                              <Box sx={{ mt: 1, display: 'flex', gap: 1 }}>
-                                <Button
-                                  size="small"
-                                  startIcon={<EditLocationIcon />}
-                                  onClick={() => {
-                                    setSelectedPoint({
-                                      id: point.id,
-                                      geoPoint: point.geoPoint,
-                                      priority: point.priority
-                                    });
-                                    setPointPriority(point.priority);
-                                    setIsAddingPoint(true);
-                                  }}
-                                >
-                                  Edit
-                                </Button>
-                                <Button
-                                  size="small"
-                                  color="error"
-                                  startIcon={<DeleteIcon />}
-                                  onClick={() => handleDeletePoint(point.id)}
-                                >
-                                  Delete
-                                </Button>
-                              </Box>
-                            )}
-                          </Box>
-                        </Popup>
-                      </Marker>
-                    ))
+                    member.points?.map((point) => {
+                      const isEditing = isEditingPoint && selectedPoint?.id === point.id;
+                      const displayLocation = isEditing ? editingLocation || point.geoPoint : point.geoPoint;
+                      
+                      return (
+                        <Marker
+                          key={point.id}
+                          position={[displayLocation.lat, displayLocation.lon]}
+                          icon={createCustomIcon(userColors[member.userId], point.priority.toString())}
+                        >
+                          <Popup>
+                            <Box>
+                              <Typography variant="subtitle2" sx={{ color: userColors[member.userId], fontWeight: 'bold' }}>
+                                {member.userName}
+                              </Typography>
+                              <Typography variant="body2">
+                                Priority: {point.priority}
+                              </Typography>
+                              {member.userId === userId && !isEditingPoint && (
+                                <Box sx={{ mt: 1, display: 'flex', gap: 1 }}>
+                                  <Button
+                                    size="small"
+                                    startIcon={<EditLocationIcon />}
+                                    onClick={() => handleEditClick(point)}
+                                  >
+                                    Edit
+                                  </Button>
+                                  <Button
+                                    size="small"
+                                    color="error"
+                                    startIcon={<DeleteIcon />}
+                                    onClick={() => handleDeletePoint(point.id)}
+                                  >
+                                    Delete
+                                  </Button>
+                                </Box>
+                              )}
+                            </Box>
+                          </Popup>
+                        </Marker>
+                      );
+                    })
                   )}
 
                   {selectedTrackPoints.length > 0 && (
@@ -648,6 +742,23 @@ const HikeDetailsPage: React.FC = () => {
                           mb: 1,
                         }}
                       >
+                        <Box sx={{ 
+                          width: 24, 
+                          height: 24, 
+                          borderRadius: '50%', 
+                          backgroundColor: userColors[member.userId],
+                          border: '2px solid white',
+                          boxShadow: '0 0 4px rgba(0,0,0,0.4)',
+                          mr: 2,
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                          color: 'white',
+                          fontSize: '12px',
+                          fontWeight: 'bold'
+                        }}>
+                          {member.points?.length || 0}
+                        </Box>
                         <ListItemText 
                           primary={
                             <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>

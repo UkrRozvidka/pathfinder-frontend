@@ -17,12 +17,16 @@ import {
 } from '@mui/material';
 import { useAuth } from '../contexts/AuthContext';
 import { Delete as DeleteIcon } from '@mui/icons-material';
+import Brightness4Icon from '@mui/icons-material/Brightness4';
+import Brightness7Icon from '@mui/icons-material/Brightness7';
 
 interface LayoutProps {
   children: React.ReactNode;
+  toggleColorMode: () => void;
+  mode: 'light' | 'dark';
 }
 
-const Layout: React.FC<LayoutProps> = ({ children }) => {
+const Layout: React.FC<LayoutProps> = ({ children, toggleColorMode, mode }) => {
   const navigate = useNavigate();
   const { isAuthenticated, userName, logout } = useAuth();
 
@@ -47,6 +51,13 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
           >
             PathFinder
           </Typography>
+          <IconButton
+            sx={{ mr: 2 }}
+            onClick={toggleColorMode}
+            color="inherit"
+          >
+            {mode === 'dark' ? <Brightness7Icon /> : <Brightness4Icon />}
+          </IconButton>
           {isAuthenticated ? (
             <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
               <Typography variant="body1">
