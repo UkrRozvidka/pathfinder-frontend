@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useMemo } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import {
   Box,
@@ -29,7 +29,9 @@ import PersonRemoveIcon from '@mui/icons-material/PersonRemove';
 import AddLocationIcon from '@mui/icons-material/AddLocation';
 import EditLocationIcon from '@mui/icons-material/EditLocation';
 import EditIcon from '@mui/icons-material/Edit';
-import { MapContainer, TileLayer, Marker, Popup, useMapEvents } from 'react-leaflet';
+import AddIcon from '@mui/icons-material/Add';
+import { MapContainer, TileLayer, Marker, Popup, Polyline, useMapEvents } from 'react-leaflet';
+import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
 import { useAuth } from '../contexts/AuthContext';
 import { hikeApi, hikeMemberApi, pointApi, trackApi } from '../services/api';
@@ -37,7 +39,14 @@ import { HikeGetFullDTO, PointCreateDTO, PointUpdateDTO, GeoPoint } from '../typ
 import CloudUploadIcon from '@mui/icons-material/CloudUpload';
 import CloudDownloadIcon from '@mui/icons-material/CloudDownload';
 import { styled } from '@mui/material/styles';
-import AddIcon from '@mui/icons-material/Add';
+
+// Fix Leaflet default icon
+delete (L.Icon.Default.prototype as any)._getIconUrl;
+L.Icon.Default.mergeOptions({
+  iconRetinaUrl: require('leaflet/dist/images/marker-icon-2x.png'),
+  iconUrl: require('leaflet/dist/images/marker-icon.png'),
+  shadowUrl: require('leaflet/dist/images/marker-shadow.png'),
+});
 
 const DEFAULT_CENTER: GeoPoint = {
   lat: 48.5,
@@ -66,6 +75,98 @@ const Input = styled('input')({
   display: 'none',
 });
 
+// Custom marker icons
+const createCustomIcon = (color: string, text?: string) => {
+  return L.divIcon({
+    className: 'custom-marker',
+    html: `
+      <div style="
+        background-color: ${color};
+        width: 25px;
+        height: 25px;
+        border-radius: 50%;
+        border: 2px solid white;
+        box-shadow: 0 0 4px rgba(0,0,0,0.4);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        color: white;
+        font-weight: bold;
+        font-size: 12px;
+      ">
+        ${text || ''}
+      </div>
+    `,
+    iconSize: [25, 25],
+    iconAnchor: [12, 12],
+  });
+};
+
+const startIcon = L.divIcon({
+  className: 'custom-marker',
+  html: `
+    <div style="
+      background-color: #4CAF50;
+      width: 35px;
+      height: 35px;
+      border-radius: 50%;
+      border: 3px solid white;
+      box-shadow: 0 0 4px rgba(0,0,0,0.4);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: white;
+      font-weight: bold;
+      font-size: 14px;
+    ">
+      S
+    </div>
+  `,
+  iconSize: [35, 35],
+  iconAnchor: [17, 17],
+});
+
+const endIcon = L.divIcon({
+  className: 'custom-marker',
+  html: `
+    <div style="
+      background-color: #f44336;
+      width: 35px;
+      height: 35px;
+      border-radius: 50%;
+      border: 3px solid white;
+      box-shadow: 0 0 4px rgba(0,0,0,0.4);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: white;
+      font-weight: bold;
+      font-size: 14px;
+    ">
+      F
+    </div>
+  `,
+  iconSize: [35, 35],
+  iconAnchor: [17, 17],
+});
+
+// Function to generate a color based on userId
+const getUserColor = (userId: number): string => {
+  // List of distinct colors
+  const colors = [
+    '#3498db', // blue
+    '#e74c3c', // red
+    '#2ecc71', // green
+    '#f1c40f', // yellow
+    '#9b59b6', // purple
+    '#1abc9c', // turquoise
+    '#e67e22', // orange
+    '#34495e', // navy
+  ];
+  
+  return colors[userId % colors.length];
+};
+
 const HikeDetailsPage: React.FC = () => {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
@@ -83,6 +184,8 @@ const HikeDetailsPage: React.FC = () => {
   const [selectedTrack, setSelectedTrack] = useState<number | null>(null);
   const [newTrackDialogOpen, setNewTrackDialogOpen] = useState(false);
   const [newTrackName, setNewTrackName] = useState('');
+  const [selectedTrackPoints, setSelectedTrackPoints] = useState<[number, number][]>([]);
+  const [trackLoadError, setTrackLoadError] = useState<string>('');
 
   useEffect(() => {
     const fetchHike = async () => {
@@ -254,20 +357,60 @@ const HikeDetailsPage: React.FC = () => {
     }
   };
 
+  const parseGpxString = (gpxString: string): [number, number][] => {
+    try {
+      const parser = new DOMParser();
+      const xmlDoc = parser.parseFromString(gpxString, "text/xml");
+      const trackpoints = xmlDoc.getElementsByTagName("trkpt");
+      const points: [number, number][] = [];
+
+      for (let i = 0; i < trackpoints.length; i++) {
+        const point = trackpoints[i];
+        const lat = parseFloat(point.getAttribute("lat") || "0");
+        const lon = parseFloat(point.getAttribute("lon") || "0");
+        if (!isNaN(lat) && !isNaN(lon)) {
+          points.push([lat, lon]);
+        }
+      }
+
+      return points;
+    } catch (error) {
+      console.error('Failed to parse GPX data:', error);
+      throw new Error('Failed to parse GPX data');
+    }
+  };
+
   const handleTrackSelect = async (trackId: number) => {
     try {
       if (selectedTrack === trackId) {
         setSelectedTrack(null);
+        setSelectedTrackPoints([]);
         return;
       }
 
       const response = await trackApi.getTrack(trackId);
       setSelectedTrack(trackId);
-      // Here you would need to parse the GPX data and display it on the map
-      // This would require additional library for parsing GPX and displaying on the map
+
+      // Convert base64 string to text
+      const gpxString = atob(response.data.gpxFile);
+      const trackPoints = parseGpxString(gpxString);
+      setSelectedTrackPoints(trackPoints);
+      setTrackLoadError('');
+
+      // If we have points, center the map on the first point
+      if (trackPoints.length > 0) {
+        const mapElement = document.querySelector('.leaflet-container');
+        if (mapElement) {
+          const map = (mapElement as any)._leaflet_map;
+          if (map) {
+            map.fitBounds(trackPoints);
+          }
+        }
+      }
     } catch (error) {
       console.error('Failed to load track:', error);
-      setError('Failed to load track. Please try again.');
+      setTrackLoadError('Failed to load track data. The track might be empty or in an invalid format.');
+      setSelectedTrackPoints([]);
     }
   };
 
@@ -288,6 +431,15 @@ const HikeDetailsPage: React.FC = () => {
       setError('Failed to create track. Please try again.');
     }
   };
+
+  // Memoize user colors to keep them consistent
+  const userColors = useMemo(() => {
+    const colors: { [key: number]: string } = {};
+    hike?.hikeMembers?.forEach(member => {
+      colors[member.userId] = getUserColor(member.userId);
+    });
+    return colors;
+  }, [hike?.hikeMembers]);
 
   if (loading || !hike) {
     return (
@@ -366,11 +518,25 @@ const HikeDetailsPage: React.FC = () => {
                     isActive={isAddingPoint || selectedPoint !== null} 
                   />
                   
-                  <Marker position={[hike.startPoint.lat, hike.startPoint.lon]}>
-                    <Popup>Start Point</Popup>
+                  <Marker 
+                    position={[hike.startPoint.lat, hike.startPoint.lon]}
+                    icon={startIcon}
+                  >
+                    <Popup>
+                      <Typography variant="subtitle2" color="primary">
+                        Start Point
+                      </Typography>
+                    </Popup>
                   </Marker>
-                  <Marker position={[hike.endPoint.lat, hike.endPoint.lon]}>
-                    <Popup>End Point</Popup>
+                  <Marker 
+                    position={[hike.endPoint.lat, hike.endPoint.lon]}
+                    icon={endIcon}
+                  >
+                    <Popup>
+                      <Typography variant="subtitle2" color="error">
+                        End Point
+                      </Typography>
+                    </Popup>
                   </Marker>
                   
                   {hike.hikeMembers?.map((member) =>
@@ -378,44 +544,65 @@ const HikeDetailsPage: React.FC = () => {
                       <Marker
                         key={point.id}
                         position={[point.geoPoint.lat, point.geoPoint.lon]}
+                        icon={createCustomIcon(userColors[member.userId], point.priority.toString())}
                       >
                         <Popup>
-                          <Typography variant="body2">
-                            {member.userName}'s Point (Priority: {point.priority})
-                          </Typography>
-                          {member.userId === userId && (
-                            <Box sx={{ mt: 1, display: 'flex', gap: 1 }}>
-                              <Button
-                                size="small"
-                                startIcon={<EditLocationIcon />}
-                                onClick={() => {
-                                  setSelectedPoint({
-                                    id: point.id,
-                                    geoPoint: point.geoPoint,
-                                    priority: point.priority
-                                  });
-                                  setPointPriority(point.priority);
-                                  setIsAddingPoint(true);
-                                }}
-                              >
-                                Edit
-                              </Button>
-                              <Button
-                                size="small"
-                                color="error"
-                                startIcon={<DeleteIcon />}
-                                onClick={() => handleDeletePoint(point.id)}
-                              >
-                                Delete
-                              </Button>
-                            </Box>
-                          )}
+                          <Box>
+                            <Typography variant="subtitle2" sx={{ color: userColors[member.userId], fontWeight: 'bold' }}>
+                              {member.userName}
+                            </Typography>
+                            <Typography variant="body2">
+                              Priority: {point.priority}
+                            </Typography>
+                            {member.userId === userId && (
+                              <Box sx={{ mt: 1, display: 'flex', gap: 1 }}>
+                                <Button
+                                  size="small"
+                                  startIcon={<EditLocationIcon />}
+                                  onClick={() => {
+                                    setSelectedPoint({
+                                      id: point.id,
+                                      geoPoint: point.geoPoint,
+                                      priority: point.priority
+                                    });
+                                    setPointPriority(point.priority);
+                                    setIsAddingPoint(true);
+                                  }}
+                                >
+                                  Edit
+                                </Button>
+                                <Button
+                                  size="small"
+                                  color="error"
+                                  startIcon={<DeleteIcon />}
+                                  onClick={() => handleDeletePoint(point.id)}
+                                >
+                                  Delete
+                                </Button>
+                              </Box>
+                            )}
+                          </Box>
                         </Popup>
                       </Marker>
                     ))
                   )}
+
+                  {selectedTrackPoints.length > 0 && (
+                    <Polyline
+                      positions={selectedTrackPoints}
+                      color="blue"
+                      weight={3}
+                      opacity={0.7}
+                    />
+                  )}
                 </MapContainer>
               </Box>
+
+              {trackLoadError && (
+                <Alert severity="error" sx={{ mt: 2 }} onClose={() => setTrackLoadError('')}>
+                  {trackLoadError}
+                </Alert>
+              )}
             </CardContent>
           </Card>
         </Grid>
