@@ -52,6 +52,7 @@ export const trackApi = {
       'Content-Type': 'multipart/form-data',
     },
   }),
+  createTrackWithName: (data: TrackCreateDTO) => api.post<number>('/api/track', data),
   deleteTrack: (id: number) => api.delete(`/api/track/${id}`),
   downloadTrack: (id: number) => api.get(`/api/track/${id}/download`, { 
     responseType: 'blob',

@@ -37,6 +37,7 @@ import { HikeGetFullDTO, PointCreateDTO, PointUpdateDTO, GeoPoint } from '../typ
 import CloudUploadIcon from '@mui/icons-material/CloudUpload';
 import CloudDownloadIcon from '@mui/icons-material/CloudDownload';
 import { styled } from '@mui/material/styles';
+import AddIcon from '@mui/icons-material/Add';
 
 const DEFAULT_CENTER: GeoPoint = {
   lat: 48.5,
@@ -80,6 +81,8 @@ const HikeDetailsPage: React.FC = () => {
   const [selectedPoint, setSelectedPoint] = useState<{ id: number; geoPoint: GeoPoint; priority: number } | null>(null);
   const [pointPriority, setPointPriority] = useState(1);
   const [selectedTrack, setSelectedTrack] = useState<number | null>(null);
+  const [newTrackDialogOpen, setNewTrackDialogOpen] = useState(false);
+  const [newTrackName, setNewTrackName] = useState('');
 
   useEffect(() => {
     const fetchHike = async () => {
@@ -265,6 +268,24 @@ const HikeDetailsPage: React.FC = () => {
     } catch (error) {
       console.error('Failed to load track:', error);
       setError('Failed to load track. Please try again.');
+    }
+  };
+
+  const handleCreateTrack = async () => {
+    if (!hike || !newTrackName.trim()) return;
+
+    try {
+      await trackApi.createTrackWithName({
+        hikeId: hike.id,
+        fileName: newTrackName.trim()
+      });
+      const response = await hikeApi.getHike(hike.id);
+      setHike(response.data);
+      setNewTrackDialogOpen(false);
+      setNewTrackName('');
+    } catch (error) {
+      console.error('Failed to create track:', error);
+      setError('Failed to create track. Please try again.');
     }
   };
 
@@ -476,22 +497,16 @@ const HikeDetailsPage: React.FC = () => {
                 <Typography variant="h6" gutterBottom sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
                   Tracks
                   {hike.adminId === userId && (
-                    <label htmlFor="track-upload">
-                      <Input
-                        id="track-upload"
-                        type="file"
-                        accept=".gpx"
-                        onChange={handleTrackUpload}
-                      />
+                    <Box sx={{ display: 'flex', gap: 1 }}>
                       <Button
-                        component="span"
                         variant="outlined"
                         size="small"
-                        startIcon={<CloudUploadIcon />}
+                        startIcon={<AddIcon />}
+                        onClick={() => setNewTrackDialogOpen(true)}
                       >
-                        Upload GPX
+                        New Track
                       </Button>
-                    </label>
+                    </Box>
                   )}
                 </Typography>
 
@@ -613,6 +628,27 @@ const HikeDetailsPage: React.FC = () => {
             startIcon={<PersonRemoveIcon />}
           >
             Remove Member
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      <Dialog open={newTrackDialogOpen} onClose={() => setNewTrackDialogOpen(false)}>
+        <DialogTitle>Create New Track</DialogTitle>
+        <DialogContent>
+          <TextField
+            autoFocus
+            margin="dense"
+            label="Track Name"
+            type="text"
+            fullWidth
+            value={newTrackName}
+            onChange={(e) => setNewTrackName(e.target.value)}
+          />
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setNewTrackDialogOpen(false)}>Cancel</Button>
+          <Button onClick={handleCreateTrack} variant="contained" disabled={!newTrackName.trim()}>
+            Create
           </Button>
         </DialogActions>
       </Dialog>
